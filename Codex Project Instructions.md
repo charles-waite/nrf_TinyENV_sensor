@@ -8,14 +8,18 @@ The aim is to take the same general project focus but rewrite it to compile and 
 * Matter over Thread
 * Low-power implementation
 	* Sleepy End Device
-	* ICD-LIT enabled
-	* ~2 minute update/poll cadence
-	* <1mA average consumption target
-* SHT41 temp and relative humidity matter endpoints
+	* ICD support required
+	* LIT enabled for max runtime/min consumption
+	* <200uA average consumption target
+	* Consumption >1mA unacceptable
+* SHT41 sensor conncected over I2C
+* 	Temp and relative humidity matter endpoint clusters.
 * Powered by single 18650 Li-Ion Cell
-	* wired to built-in battery management circuit in XIAO nRF52840 board
+	* Wired to built-in battery management circuit in XIAO nRF52840 board
 	* Targeting 6mo runtime on ~2200mAh battery
-* No OTA support required
+* Matter clusters for Battery voltage and estimated percent remaining cluster.
+	* 2:1 Voltage divider needed to read voltage and thus estimate battery life. Will need a suggestion on how to implement on this board (I suspect its different than on the ESP32-C6).
+* No OTA support required.
 
 ### Requirements
 * Lowest power consumption is the PRIMARY design requirement, and is the main criteria for evaluating adding or refactoring features and code.
@@ -31,7 +35,7 @@ The aim is to take the same general project focus but rewrite it to compile and 
 * Generally I want to use non-deprecated functions and libraries and the most recent versions of libraries.
 
 ### About Me
-* I'm not a developer so some deep-cut coding concepts might be difficult to understand for me. 
+* I'm not a developer so some deep-cut/advanced coding concepts might be difficult to understand for me. 
 * I'm very comfortable in CLI environments, but sometimes I may need explicit instructions to complete a task if a command is new to me. 
 * I'm not able to really debug C++ code on my own but I'm able to identify patterns and overall code structures as I become more familiar with what is being done.
 * I like to learn about new concepts as it helps me understand the code and what its doing.

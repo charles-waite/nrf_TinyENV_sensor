@@ -1,39 +1,43 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repo is the new home for a TinyENV Sensor port targeting **Seeed XIAO nRF52840**. The existing `ESP32 source/` directory is a reference implementation for the ESP32‑C6; use it for guidance, not as a direct code drop.
-- `ESP32 source/` holds the prior ESP‑IDF project, drivers, and Matter endpoint examples.
-- New nRF52840 code should live in a dedicated top‑level folder (create as needed) and follow Nordic‑native layouts and tooling.
-- Keep hardware‑specific assets or notes alongside the platform folder that uses them.
+This repo hosts a TinyENV Sensor port targeting **Seeed XIAO nRF52840 (non Plus/Sense)**. The `ESP32 source/` folder is an ESP32‑C6 reference; use it for guidance, not direct reuse.
+- `ESP32 source/` contains the prior ESP‑IDF project, drivers, and Matter endpoint examples.
+- New nRF52840 code should live in a dedicated top‑level folder (create as needed) and follow Nordic/Zephyr layouts.
 
-## Build, Test, and Development Commands
-Current build commands are only defined for the ESP32 reference project:
-- `idf.py set-target esp32c6` — set target MCU.
-- `idf.py build` — build the ESP32 reference with `sdkconfig.defaults`.
-- `idf.py -p /dev/cu.usbmodemXXXX erase-flash flash monitor` — clean flash + monitor.
+## Toolchain & Workspace Model
+- Standardize on **nRF Connect SDK (NCS) 3.2.1** and `west`.
+- VS Code “workspace” is just an editor concept; the **NCS workspace** is the folder containing `.west/`, `nrf/`, `zephyr/`, and `modules/`.
+- Keep this repo inside the NCS workspace, e.g. `~/ncs/apps/tinyenv/`.
 
-For the nRF52840 target, prefer Nordic tooling and update this section once a build system is established.
+## Build, Flash, and Development Commands
+Use `west` (Zephyr/NCS equivalent of `idf.py`):
+- `west init -l <app-folder>` — initialize the NCS workspace around this repo.
+- `west update` — fetch SDK dependencies.
+- `west build -b xiao_ble <app-folder>` — build for XIAO nRF52840.
+- `west flash` — flash (UF2 via USB‑C or J‑Link via SWD).
 
 ## Coding Style & Naming Conventions
-- Keep code lean and power‑focused; low‑power behavior is the primary design requirement.
-- Use existing C/C++ style in the repo as a reference: 2‑space indentation, `snake_case` functions, `UPPER_SNAKE_CASE` constants.
+- Power is the primary constraint: average current must be <200 µA; >1 mA is unacceptable.
+- Follow existing style: 2‑space indentation, `snake_case` functions, `UPPER_SNAKE_CASE` constants.
 - Favor small, testable modules over large monolithic files.
-- Avoid deprecated APIs; prefer current Nordic SDK/Zephyr equivalents.
+- Avoid deprecated APIs; prefer current Nordic/Zephyr equivalents.
 
 ## Testing Guidelines
-- No automated tests are currently defined.
-- Validate by flashing to hardware and confirming:
-  - Matter over Thread commissioning.
-  - ~2‑minute sensor update cadence.
-  - Sleepy End Device behavior and power targets (<1 mA average).
+- No automated tests are defined.
+- Validate on hardware: Matter commissioning, ~2‑minute sensor cadence, Sleepy End Device behavior, and current draw.
 - Record power measurements in PR notes when they change.
 
 ## Commit & Pull Request Guidelines
-- Git history is not available in this snapshot, so conventions can’t be inferred.
 - Use short, imperative commit messages (e.g., “Add SHT41 minimal driver”).
 - PRs should include: purpose, hardware tested, commissioning results, and power measurements.
 
 ## Configuration & Hardware Notes
-- Target platform: Seeed XIAO nRF52840 with SHT41 sensor and 18650 battery.
+- Target platform: XIAO nRF52840 + SHT41 + 18650 Li‑Ion (board BMS).
+- Include Matter Battery Voltage and Battery Percentage Remaining clusters.
+- A 2:1 voltage divider is required for battery sensing; document wiring differences between XIAO nRF52840 and XIAO ESP32‑C6 before implementation.
 - OTA is not required; LED status codes and a custom GPIO button are allowed.
-- The user is CLI‑comfortable but benefits from explicit steps for new commands.
+
+## Open Research Tasks
+- Compare XIAO nRF52840 vs XIAO ESP32‑C6 battery‑sense wiring and ADC capabilities for a 2:1 divider.
+- Identify the lowest‑power ADC or GPIO strategy that still enables battery voltage reporting.
