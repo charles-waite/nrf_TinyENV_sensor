@@ -15,6 +15,8 @@
 #include <app/server/Server.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
 #include <lib/support/Span.h>
+#include <zephyr/drivers/adc.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
@@ -43,12 +45,22 @@ constexpr chip::EndpointId kTemperatureSensorEndpointId = 1;
 
 constexpr float kPlaceholderBatteryVolts = 3.69f;
 constexpr float kBatteryGain = 1.0f; /* calibration placeholder */
+constexpr float kVbatDividerRatio = (1000000.0f + 510000.0f) / 510000.0f; /* 1M/510k */
+constexpr float kAdcRefVolts = 0.6f;
+constexpr float kAdcGainVal = 1.0f / 6.0f;
+constexpr uint8_t kAdcResolution = 12;
+constexpr uint8_t kVbatEnablePin = 14; /* P0.14 */
+constexpr uint8_t kVbatAdcChannelId = 0;
+constexpr adc_input kVbatAdcInput = ADC_INPUT_AIN7; /* P0.31 */
 
 Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
 #ifdef CONFIG_CHIP_ICD_UAT_SUPPORT
 #define UAT_BUTTON_MASK DK_BTN3_MSK
 #endif
+
+const struct device *sAdcDev = DEVICE_DT_GET(DT_NODELABEL(adc));
+const struct device *sGpioDev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 } /* namespace */
 
 void AppTask::ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged)
@@ -199,6 +211,82 @@ static float ReadBatteryVoltsPlaceholder()
 	return vbat * kBatteryGain;
 }
 
+static bool InitBatterySense()
+{
+	static bool sInit = false;
+	static bool sReady = false;
+
+	if (sInit) {
+		return sReady;
+	}
+	sInit = true;
+
+	if (!device_is_ready(sAdcDev)) {
+		LOG_ERR("ADC not ready");
+		return false;
+	}
+	if (!device_is_ready(sGpioDev)) {
+		LOG_ERR("GPIO not ready");
+		return false;
+	}
+
+	int err = gpio_pin_configure(sGpioDev, kVbatEnablePin, GPIO_OUTPUT_INACTIVE);
+	if (err) {
+		LOG_ERR("VBAT enable pin config failed: %d", err);
+		return false;
+	}
+
+	adc_channel_cfg channel_cfg = {};
+	channel_cfg.gain = ADC_GAIN_1_6;
+	channel_cfg.reference = ADC_REF_INTERNAL;
+	channel_cfg.acquisition_time = ADC_ACQ_TIME_DEFAULT;
+	channel_cfg.channel_id = kVbatAdcChannelId;
+	channel_cfg.input_positive = kVbatAdcInput;
+
+	err = adc_channel_setup(sAdcDev, &channel_cfg);
+	if (err) {
+		LOG_ERR("ADC channel setup failed: %d", err);
+		return false;
+	}
+
+	sReady = true;
+	return true;
+}
+
+static float ReadBatteryVolts()
+{
+	if (!InitBatterySense()) {
+		return ReadBatteryVoltsPlaceholder();
+	}
+
+	int16_t raw = 0;
+	adc_sequence sequence = {};
+	sequence.channels = BIT(kVbatAdcChannelId);
+	sequence.buffer = &raw;
+	sequence.buffer_size = sizeof(raw);
+	sequence.resolution = kAdcResolution;
+
+	gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
+	k_sleep(K_MSEC(2));
+	const int err = adc_read(sAdcDev, &sequence);
+	gpio_pin_set(sGpioDev, kVbatEnablePin, 0);
+
+	if (err) {
+		LOG_ERR("ADC read failed: %d", err);
+		return ReadBatteryVoltsPlaceholder();
+	}
+
+	if (raw < 0) {
+		raw = 0;
+	}
+
+	const float full_scale = kAdcRefVolts / kAdcGainVal;
+	const float v_in = (static_cast<float>(raw) / ((1 << kAdcResolution) - 1)) * full_scale;
+	const float vbat = v_in * kVbatDividerRatio * kBatteryGain;
+
+	return vbat;
+}
+
 bool AppTask::UpdateSensorReadings()
 {
 	const bool commissioned = IsCommissioned();
@@ -258,7 +346,7 @@ void AppTask::UpdateMatterAttributes()
 		LOG_ERR("Updating humidity measurement failed %x", to_underlying(status));
 	}
 
-	const float vbat = ReadBatteryVoltsPlaceholder();
+	const float vbat = ReadBatteryVolts();
 	const uint32_t mv = static_cast<uint32_t>(lroundf(vbat * 1000.0f));
 	const uint8_t pct = VoltsToPercent(vbat);
 	const uint8_t half_pct = (pct >= 100) ? 200 : static_cast<uint8_t>(pct * 2);
