@@ -20,6 +20,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
+#include <hal/nrf_saadc.h>
 
 #include <cmath>
 
@@ -51,7 +52,7 @@ constexpr float kAdcGainVal = 1.0f / 6.0f;
 constexpr uint8_t kAdcResolution = 12;
 constexpr uint8_t kVbatEnablePin = 14; /* P0.14 */
 constexpr uint8_t kVbatAdcChannelId = 0;
-constexpr adc_input kVbatAdcInput = ADC_INPUT_AIN7; /* P0.31 */
+constexpr uint8_t kVbatAdcInput = NRF_SAADC_INPUT_AIN7; /* P0.31 */
 
 Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
