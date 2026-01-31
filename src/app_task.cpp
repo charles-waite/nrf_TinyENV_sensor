@@ -21,6 +21,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <hal/nrf_saadc.h>
+#include <zephyr/devicetree.h>
 
 #include <cmath>
 
@@ -42,7 +43,13 @@ using namespace ::chip::DeviceLayer;
 
 namespace
 {
+#ifndef TINYENV_STATUS_LED_ENABLED
+#define TINYENV_STATUS_LED_ENABLED 1
+#endif
+
 constexpr chip::EndpointId kTemperatureSensorEndpointId = 1;
+constexpr uint32_t kLedHeartbeatIntervalMs = 5000;
+constexpr uint32_t kLedHeartbeatOnMs = 200;
 
 constexpr float kPlaceholderBatteryVolts = 3.69f;
 constexpr float kBatteryGain = 1.0f; /* calibration placeholder */
@@ -62,6 +69,78 @@ Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
 const struct device *sAdcDev = DEVICE_DT_GET(DT_NODELABEL(adc));
 const struct device *sGpioDev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+
+#define LED0_NODE DT_ALIAS(led0)
+#define LED1_NODE DT_ALIAS(led1)
+#define LED2_NODE DT_ALIAS(led2)
+
+#if DT_NODE_HAS_STATUS(LED0_NODE, okay)
+static const struct gpio_dt_spec sLedRed = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+#endif
+#if DT_NODE_HAS_STATUS(LED1_NODE, okay)
+static const struct gpio_dt_spec sLedGreen = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
+#endif
+#if DT_NODE_HAS_STATUS(LED2_NODE, okay)
+static const struct gpio_dt_spec sLedBlue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
+#endif
+
+#if DT_NODE_HAS_STATUS(LED0_NODE, okay) || DT_NODE_HAS_STATUS(LED1_NODE, okay) || \
+	DT_NODE_HAS_STATUS(LED2_NODE, okay)
+static constexpr bool kStatusLedEnabled = (TINYENV_STATUS_LED_ENABLED != 0);
+K_THREAD_STACK_DEFINE(sLedStack, 512);
+static struct k_thread sLedThread;
+
+// XIAO nRF52840 RGB LED is active-high (1 = on, 0 = off).
+static inline void SetLedState(const struct gpio_dt_spec & led, bool on)
+{
+	if (!device_is_ready(led.port)) {
+		return;
+	}
+	gpio_pin_set_dt(&led, on ? 1 : 0);
+}
+
+static void SetLeds(bool redOn, bool greenOn, bool blueOn)
+{
+#if DT_NODE_HAS_STATUS(LED0_NODE, okay)
+	SetLedState(sLedRed, redOn);
+#endif
+#if DT_NODE_HAS_STATUS(LED1_NODE, okay)
+	SetLedState(sLedGreen, greenOn);
+#endif
+#if DT_NODE_HAS_STATUS(LED2_NODE, okay)
+	SetLedState(sLedBlue, blueOn);
+#endif
+}
+
+static void LedStatusThread(void *, void *, void *)
+{
+	uint32_t elapsed = 0;
+
+	while (true) {
+		if (!kStatusLedEnabled) {
+			SetLeds(false, false, false);
+			k_sleep(K_MSEC(500));
+			continue;
+		}
+
+		const bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
+		const bool commissioning =
+			chip::Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen();
+
+		if (commissioning) {
+			SetLeds(false, false, true);
+		} else if (!commissioned) {
+			SetLeds(true, false, false);
+		} else {
+			const bool heartbeatOn = elapsed < kLedHeartbeatOnMs;
+			SetLeds(false, heartbeatOn, false);
+			elapsed = (elapsed + 200) % kLedHeartbeatIntervalMs;
+		}
+
+		k_sleep(K_MSEC(200));
+	}
+}
+#endif
 } /* namespace */
 
 void AppTask::ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged)
@@ -96,14 +175,39 @@ CHIP_ERROR AppTask::Init()
 	/* Initialize Matter stack */
 	ReturnErrorOnFailure(Nrf::Matter::PrepareServer());
 
-	if (!Nrf::GetBoard().Init(ButtonEventHandler)) {
-		LOG_ERR("User interface initialization failed.");
-		return CHIP_ERROR_INCORRECT_STATE;
+#if DT_NODE_HAS_STATUS(LED0_NODE, okay) || DT_NODE_HAS_STATUS(LED1_NODE, okay) || \
+	DT_NODE_HAS_STATUS(LED2_NODE, okay)
+	if (kStatusLedEnabled) {
+#if DT_NODE_HAS_STATUS(LED0_NODE, okay)
+		if (device_is_ready(sLedRed.port)) {
+			(void)gpio_pin_configure_dt(&sLedRed, GPIO_OUTPUT_INACTIVE);
+		}
+#endif
+#if DT_NODE_HAS_STATUS(LED1_NODE, okay)
+		if (device_is_ready(sLedGreen.port)) {
+			(void)gpio_pin_configure_dt(&sLedGreen, GPIO_OUTPUT_INACTIVE);
+		}
+#endif
+#if DT_NODE_HAS_STATUS(LED2_NODE, okay)
+		if (device_is_ready(sLedBlue.port)) {
+			(void)gpio_pin_configure_dt(&sLedBlue, GPIO_OUTPUT_INACTIVE);
+		}
+#endif
+		k_thread_create(&sLedThread, sLedStack, K_THREAD_STACK_SIZEOF(sLedStack),
+				LedStatusThread, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
 	}
+#endif
 
-	/* Register Matter event handler that controls the connectivity status LED based on the captured Matter network
-	 * state. */
-	ReturnErrorOnFailure(Nrf::Matter::RegisterEventHandler(Nrf::Board::DefaultMatterEventHandler, 0));
+	if (!IS_ENABLED(CONFIG_TINYENV_DISABLE_BOARD_UI)) {
+		if (!Nrf::GetBoard().Init(ButtonEventHandler)) {
+			LOG_ERR("User interface initialization failed.");
+			return CHIP_ERROR_INCORRECT_STATE;
+		}
+
+		/* Register Matter event handler that controls the connectivity status LED based on the captured Matter
+		 * network state. */
+		ReturnErrorOnFailure(Nrf::Matter::RegisterEventHandler(Nrf::Board::DefaultMatterEventHandler, 0));
+	}
 
 	ReturnErrorOnFailure(sIdentifyCluster.Init());
 

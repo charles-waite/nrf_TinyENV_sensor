@@ -13,3 +13,7 @@
 		compatible = "gpio-keys";
 	};
 };
+
+&usbd {
+	status = "okay";
+};

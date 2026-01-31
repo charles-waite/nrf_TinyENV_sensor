@@ -4077,6 +4077,13 @@
           "deviceTypeOrder": 0
         },
         {
+          "code": 775,
+          "profileId": 259,
+          "label": "MA-humsensor",
+          "name": "MA-humsensor",
+          "deviceTypeOrder": 1
+        },
+        {
           "code": 17,
           "profileId": 259,
           "label": "MA-powersource",
@@ -4086,10 +4093,12 @@
       ],
       "deviceVersions": [
         2,
+        1,
         1
       ],
       "deviceIdentifiers": [
         770,
+        775,
         17
       ],
       "deviceTypeName": "MA-tempsensor",
