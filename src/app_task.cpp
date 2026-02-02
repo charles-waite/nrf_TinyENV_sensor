@@ -17,12 +17,15 @@
 #include <lib/support/Span.h>
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <hal/nrf_saadc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
 #include <zephyr/devicetree.h>
 
+#include <atomic>
 #include <cmath>
 
 #include <zephyr/logging/log.h>
@@ -50,6 +53,9 @@ namespace
 constexpr chip::EndpointId kTemperatureSensorEndpointId = 1;
 constexpr uint32_t kLedHeartbeatIntervalMs = 5000;
 constexpr uint32_t kLedHeartbeatOnMs = 200;
+constexpr bool kEnableHeartbeat = false;
+constexpr bool kEnableSleepLogs = false;
+constexpr bool kEnableSensorLogs = false;
 
 constexpr float kPlaceholderBatteryVolts = 3.69f;
 constexpr float kBatteryGain = 1.0f; /* calibration placeholder */
@@ -59,7 +65,7 @@ constexpr float kAdcGainVal = 1.0f / 6.0f;
 constexpr uint8_t kAdcResolution = 12;
 constexpr uint8_t kVbatEnablePin = 14; /* P0.14 */
 constexpr uint8_t kVbatAdcChannelId = 0;
-constexpr uint8_t kVbatAdcInput = NRF_SAADC_INPUT_AIN7; /* P0.31 */
+constexpr uint8_t kVbatAdcInput = NRF_SAADC_AIN7; /* P0.31 / AIN7 */
 
 Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
@@ -69,6 +75,8 @@ Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
 const struct device *sAdcDev = DEVICE_DT_GET(DT_NODELABEL(adc));
 const struct device *sGpioDev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+const struct device *sI2c1Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c1));
+const struct device *sI2c0Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c0));
 
 #define LED0_NODE DT_ALIAS(led0)
 #define LED1_NODE DT_ALIAS(led1)
@@ -89,6 +97,12 @@ static const struct gpio_dt_spec sLedBlue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 static constexpr bool kStatusLedEnabled = (TINYENV_STATUS_LED_ENABLED != 0);
 K_THREAD_STACK_DEFINE(sLedStack, 512);
 static struct k_thread sLedThread;
+static std::atomic<bool> sPulseActive{false};
+
+#if DT_HAS_ALIAS(wake_btn)
+static const struct gpio_dt_spec sWakeBtn = GPIO_DT_SPEC_GET(DT_ALIAS(wake_btn), gpios);
+static struct gpio_callback sWakeBtnCb;
+#endif
 
 // XIAO nRF52840 RGB LED is active-high (1 = on, 0 = off).
 static inline void SetLedState(const struct gpio_dt_spec & led, bool on)
@@ -123,6 +137,11 @@ static void LedStatusThread(void *, void *, void *)
 			continue;
 		}
 
+		if (sPulseActive.load()) {
+			k_sleep(K_MSEC(50));
+			continue;
+		}
+
 		const bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 		const bool commissioning =
 			chip::Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen();
@@ -132,15 +151,102 @@ static void LedStatusThread(void *, void *, void *)
 		} else if (!commissioned) {
 			SetLeds(true, false, false);
 		} else {
-			const bool heartbeatOn = elapsed < kLedHeartbeatOnMs;
-			SetLeds(false, heartbeatOn, false);
-			elapsed = (elapsed + 200) % kLedHeartbeatIntervalMs;
+			if (kEnableHeartbeat) {
+				const bool heartbeatOn = elapsed < kLedHeartbeatOnMs;
+				SetLeds(false, heartbeatOn, false);
+				elapsed = (elapsed + 200) % kLedHeartbeatIntervalMs;
+			} else {
+				SetLeds(false, false, false);
+			}
 		}
 
 		k_sleep(K_MSEC(200));
 	}
 }
 #endif
+
+static void LogI2CBusScan()
+{
+	struct Bus {
+		const char *label;
+		const struct device *dev;
+	};
+
+	const Bus buses[] = {
+		{"I2C1", sI2c1Dev},
+		{"I2C0", sI2c0Dev},
+	};
+
+	for (const auto &bus : buses) {
+		if (!bus.dev || !device_is_ready(bus.dev)) {
+			LOG_ERR("%s not ready", bus.label);
+			continue;
+		}
+
+		uint8_t found_count = 0;
+		for (uint8_t addr = 0x03; addr < 0x78; ++addr) {
+			const int err = i2c_write(bus.dev, nullptr, 0, addr);
+			if (err == 0) {
+				LOG_WRN("%s device detected at 0x%02X", bus.label, addr);
+				++found_count;
+			}
+		}
+
+		if (found_count == 0) {
+			LOG_ERR("No I2C devices found on %s", bus.label);
+		}
+	}
+}
+
+static void PulseGreenOnce()
+{
+#if DT_NODE_HAS_STATUS(LED1_NODE, okay)
+	sPulseActive.store(true);
+	SetLedState(sLedGreen, true);
+	k_sleep(K_MSEC(200));
+	SetLedState(sLedGreen, false);
+	sPulseActive.store(false);
+#else
+	k_sleep(K_MSEC(200));
+#endif
+}
+
+static void WakeButtonHandler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+
+	if (kEnableSleepLogs) {
+		LOG_WRN("Wake button pressed.");
+	}
+	Server::GetInstance().GetICDManager().OnNetworkActivity();
+}
+
+static void InitWakeButton()
+{
+#if DT_HAS_ALIAS(wake_btn)
+	if (!device_is_ready(sWakeBtn.port)) {
+		LOG_ERR("Wake button GPIO not ready");
+		return;
+	}
+
+	int err = gpio_pin_configure_dt(&sWakeBtn, GPIO_INPUT);
+	if (err) {
+		LOG_ERR("Wake button config failed: %d", err);
+		return;
+	}
+
+	err = gpio_pin_interrupt_configure_dt(&sWakeBtn, GPIO_INT_EDGE_TO_ACTIVE);
+	if (err) {
+		LOG_ERR("Wake button interrupt config failed: %d", err);
+		return;
+	}
+
+	gpio_init_callback(&sWakeBtnCb, WakeButtonHandler, BIT(sWakeBtn.pin));
+	gpio_add_callback(sWakeBtn.port, &sWakeBtnCb);
+#endif
+}
 } /* namespace */
 
 void AppTask::ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged)
@@ -161,11 +267,18 @@ void AppTask::UpdateTemperatureTimeoutCallback(k_timer *timer)
 
 	DeviceLayer::PlatformMgr().ScheduleWork(
 		[](intptr_t p) {
-			if (!AppTask::Instance().UpdateSensorReadings()) {
+			if (kEnableSleepLogs) {
+				LOG_WRN("Waking from sleep. Updating sensors...");
+			}
+			if (!AppTask::Instance().UpdateSensorReadings(false)) {
 				return;
 			}
 
 			AppTask::Instance().UpdateMatterAttributes();
+			PulseGreenOnce();
+			if (kEnableSleepLogs) {
+				LOG_WRN("Entering sleep for %u seconds.", kSensorUpdateIntervalMs / 1000);
+			}
 		},
 		reinterpret_cast<intptr_t>(timer->user_data));
 }
@@ -214,11 +327,13 @@ CHIP_ERROR AppTask::Init()
 	mSht4x = DEVICE_DT_GET_ANY(sensirion_sht4x);
 	if (mSht4x && device_is_ready(mSht4x)) {
 		mShtReady = true;
-		LOG_INF("SHT4x sensor ready");
+		LOG_WRN("SHT4x sensor ready: %s", mSht4x->name);
 	} else {
 		mShtReady = false;
 		LOG_ERR("SHT4x sensor not ready");
 	}
+	LogI2CBusScan();
+	InitWakeButton();
 
 #ifdef CONFIG_CHIP_ICD_UAT_SUPPORT
 	{
@@ -265,8 +380,9 @@ CHIP_ERROR AppTask::StartApp()
 	k_timer_user_data_set(&mTimer, this);
 	k_timer_start(&mTimer, K_MSEC(kSensorUpdateIntervalMs), K_MSEC(kSensorUpdateIntervalMs));
 
-	if (UpdateSensorReadings()) {
+	if (UpdateSensorReadings(true)) {
 		UpdateMatterAttributes();
+		PulseGreenOnce();
 	}
 
 	while (true) {
@@ -311,7 +427,7 @@ static uint8_t VoltsToPercent(float v)
 
 static float ReadBatteryVoltsPlaceholder()
 {
-	/* TODO: Replace with ADC-based VBAT read (likely 1:2 divider). */
+	/* Placeholder used if ADC init/read fails. */
 	const float vbat = kPlaceholderBatteryVolts;
 	return vbat * kBatteryGain;
 }
@@ -340,6 +456,8 @@ static bool InitBatterySense()
 		LOG_ERR("VBAT enable pin config failed: %d", err);
 		return false;
 	}
+	/* VBAT sense enable is active-low (sink). */
+	gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
 
 	adc_channel_cfg channel_cfg = {};
 	channel_cfg.gain = ADC_GAIN_1_6;
@@ -371,10 +489,10 @@ static float ReadBatteryVolts()
 	sequence.buffer_size = sizeof(raw);
 	sequence.resolution = kAdcResolution;
 
-	gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
+	gpio_pin_set(sGpioDev, kVbatEnablePin, 0);
 	k_sleep(K_MSEC(2));
 	const int err = adc_read(sAdcDev, &sequence);
-	gpio_pin_set(sGpioDev, kVbatEnablePin, 0);
+	gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
 
 	if (err) {
 		LOG_ERR("ADC read failed: %d", err);
@@ -392,7 +510,7 @@ static float ReadBatteryVolts()
 	return vbat;
 }
 
-bool AppTask::UpdateSensorReadings()
+bool AppTask::UpdateSensorReadings(bool force)
 {
 	const bool commissioned = IsCommissioned();
 	const int64_t now_ms = k_uptime_get();
@@ -402,11 +520,11 @@ bool AppTask::UpdateSensorReadings()
 		mCommissionedAtMs = commissioned ? now_ms : 0;
 	}
 
-	if (!commissioned) {
+	if (!force && !commissioned) {
 		return false;
 	}
 
-	if (mCommissionedAtMs > 0 && (now_ms - mCommissionedAtMs) < kCommissionGraceMs) {
+	if (!force && mCommissionedAtMs > 0 && (now_ms - mCommissionedAtMs) < kCommissionGraceMs) {
 		return false;
 	}
 
@@ -432,6 +550,12 @@ bool AppTask::UpdateSensorReadings()
 
 	mCurrentTemperature = static_cast<int16_t>(lround(temp_c * 100.0));
 	mCurrentHumidity = static_cast<uint16_t>(lround(rh * 100.0));
+
+	static uint32_t sShtLogCount = 0;
+	++sShtLogCount;
+	if (kEnableSensorLogs && (sShtLogCount == 1 || (sShtLogCount % 10) == 0)) {
+		LOG_WRN("SHT4x sample: %.2f C, %.2f %%RH", temp_c, rh);
+	}
 
 	return true;
 }
@@ -465,6 +589,12 @@ void AppTask::UpdateMatterAttributes()
 		kTemperatureSensorEndpointId, Clusters::PowerSource::BatChargeLevelEnum::kOk);
 	Clusters::PowerSource::Attributes::BatVoltage::Set(kTemperatureSensorEndpointId, mv);
 	Clusters::PowerSource::Attributes::BatPercentRemaining::Set(kTemperatureSensorEndpointId, half_pct);
+
+	static uint32_t sBatteryLogCount = 0;
+	++sBatteryLogCount;
+	if (kEnableSensorLogs && (sBatteryLogCount == 1 || (sBatteryLogCount % 10) == 0)) {
+		LOG_WRN("Battery sample: %.3f V (%u%%)", static_cast<double>(vbat), pct);
+	}
 
 	VLOG_DBG("Sensor update: temp=%d, rh=%u, vbat=%.3fV (%u%%)",
 		 GetCurrentTemperature(), GetCurrentHumidity(), vbat, pct);

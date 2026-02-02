@@ -30,14 +30,14 @@ private:
 	CHIP_ERROR Init();
 	k_timer mTimer;
 
-	static constexpr uint32_t kSensorUpdateIntervalMs = 120000; /* 120 seconds */
-	static constexpr uint32_t kCommissionGraceMs = 60000; /* allow initial networking */
+	static constexpr uint32_t kSensorUpdateIntervalMs = 60000; /* 60 seconds */
+	static constexpr uint32_t kCommissionGraceMs = 30000; /* allow initial networking */
 
 	static void UpdateTemperatureTimeoutCallback(k_timer *timer);
 
 	static void ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged);
 
-	bool UpdateSensorReadings();
+	bool UpdateSensorReadings(bool force);
 	void UpdateMatterAttributes();
 	bool IsCommissioned() const;
 

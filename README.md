@@ -4,11 +4,13 @@ This repo customizes Nordic's Matter Temperature Sensor sample for the Seeed XIA
 
 ## Current Functionality
 
-- **SHT4x sensor on I2C1** (real temperature + humidity).
+- **SHT4x sensor on I2C0** (real temperature + humidity).
 - **Battery voltage sense** using the XIAO nRF52840 VBAT circuit:
   - **Enable pin**: P0.14 (drive low to enable)
   - **ADC input**: P0.31 (AIN7)
   - **Divider**: 1 MΩ / 510 kΩ
+- **Wake button (optional)**: add a `wake_btn` alias in the devicetree overlay to enable a GPIO wake event.
+- **Sleep logging toggle**: set `kEnableSleepLogs = true` in `src/app_task.cpp` to log sleep/wake cycles.
 
 ## Branches
 
@@ -51,3 +53,4 @@ PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
 ## TODO
 
 - Research the Matter Low Power (0x0508) cluster before enabling it in ZAP.
+- Consider adding atmospheric pressure sensing/cluster support.
