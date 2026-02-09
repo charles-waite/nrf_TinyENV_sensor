@@ -94,7 +94,8 @@ static const struct gpio_dt_spec sLedBlue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 
 #if DT_NODE_HAS_STATUS(LED0_NODE, okay) || DT_NODE_HAS_STATUS(LED1_NODE, okay) || \
 	DT_NODE_HAS_STATUS(LED2_NODE, okay)
-static constexpr bool kStatusLedEnabled = (TINYENV_STATUS_LED_ENABLED != 0);
+static constexpr bool kStatusLedEnabled =
+	(TINYENV_STATUS_LED_ENABLED != 0) && IS_ENABLED(CONFIG_TINYENV_ENABLE_STATUS_LED_ACTIVITY);
 K_THREAD_STACK_DEFINE(sLedStack, 512);
 static struct k_thread sLedThread;
 static std::atomic<bool> sPulseActive{false};
@@ -200,6 +201,10 @@ static void LogI2CBusScan()
 
 static void PulseGreenOnce()
 {
+	if (!IS_ENABLED(CONFIG_TINYENV_ENABLE_STATUS_LED_ACTIVITY)) {
+		return;
+	}
+
 #if DT_NODE_HAS_STATUS(LED1_NODE, okay)
 	sPulseActive.store(true);
 	SetLedState(sLedGreen, true);
@@ -332,7 +337,9 @@ CHIP_ERROR AppTask::Init()
 		mShtReady = false;
 		LOG_ERR("SHT4x sensor not ready");
 	}
-	LogI2CBusScan();
+	if (IS_ENABLED(CONFIG_TINYENV_ENABLE_BOOT_I2C_SCAN)) {
+		LogI2CBusScan();
+	}
 	InitWakeButton();
 
 #ifdef CONFIG_CHIP_ICD_UAT_SUPPORT

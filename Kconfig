@@ -34,6 +34,14 @@ config TINYENV_DISABLE_BOARD_UI
 	bool "Disable board UI (LED widget/event handler)"
 	default n
 
+config TINYENV_ENABLE_STATUS_LED_ACTIVITY
+	bool "Enable status LED thread and sensor-pulse LED"
+	default y
+
+config TINYENV_ENABLE_BOOT_I2C_SCAN
+	bool "Enable I2C bus scan at boot"
+	default y
+
 
 # Reduce Thread TX output power to 0 dBm for SED device
 config OPENTHREAD_DEFAULT_TX_POWER

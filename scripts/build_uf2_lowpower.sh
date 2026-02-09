@@ -6,8 +6,8 @@ TOOLCHAIN_ROOT="/opt/nordic/ncs/toolchains/322ac893fe"
 PYTHON_BIN="${TOOLCHAIN_ROOT}/opt/python@3.12/bin"
 TOOLCHAIN_BIN="${TOOLCHAIN_ROOT}/bin"
 ZEPHYR_SDK="${TOOLCHAIN_ROOT}/opt/zephyr-sdk"
-BUILD_DIR="${ROOT_DIR}/build/xiao_ble_uf2_app"
-CACHE_DIR="${ROOT_DIR}/build/zephyr-cache"
+BUILD_DIR="${ROOT_DIR}/build/xiao_ble_uf2_lowpower"
+CACHE_DIR="${ROOT_DIR}/build/zephyr-cache-lowpower"
 
 export PATH="${TOOLCHAIN_BIN}:${PYTHON_BIN}:${PATH}"
 if [[ "${CCACHE_DISABLE:-}" == "1" ]]; then
@@ -30,7 +30,7 @@ fi
   -GNinja \
   -DBOARD=xiao_ble \
   -DCONF_FILE=prj.conf \
-  -DEXTRA_CONF_FILE=prj_uf2.conf \
+  -DEXTRA_CONF_FILE="prj_uf2.conf;prj_lowpower.conf" \
   -DPython3_EXECUTABLE="${PYTHON_BIN}/python3.12" \
   -DZEPHYR_TOOLCHAIN_VARIANT=zephyr \
   -DZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK}" \

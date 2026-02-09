@@ -33,6 +33,7 @@ Builds a UF2 app without MCUboot/OTA for the stock UF2 bootloader.
 
 Output:
 - `build/xiao_ble_uf2_app/zephyr/zephyr.uf2`
+- Low-power profile output: `build/xiao_ble_uf2_lowpower/zephyr/zephyr.uf2`
 
 Build commands (from repo root):
 
@@ -49,6 +50,17 @@ ZEPHYR_SDK_INSTALL_DIR=/opt/nordic/ncs/toolchains/322ac893fe/opt/zephyr-sdk \
 PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
 /opt/homebrew/bin/cmake --build /Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app
 ```
+
+Low-power measurement build:
+
+```sh
+./scripts/build_uf2_lowpower.sh
+```
+
+Notes:
+- `./scripts/build_uf2.sh` remains the debug-friendly UF2 profile.
+- `./scripts/build_uf2_lowpower.sh` adds `prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
+- Both scripts use `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
 
 ## TODO
 

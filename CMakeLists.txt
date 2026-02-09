@@ -32,8 +32,11 @@ target_include_directories(app PRIVATE
 target_sources(app PRIVATE
   src/app_task.cpp
   src/main.cpp
-  src/shell_commands.cpp
 )
+
+if(CONFIG_SHELL)
+  target_sources(app PRIVATE src/shell_commands.cpp)
+endif()
 
 ncs_configure_data_model()
 # NORDIC SDK APP END
