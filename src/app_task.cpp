@@ -15,6 +15,9 @@
 #include <app/server/Server.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
 #include <lib/support/Span.h>
+#include <openthread.h>
+#include <openthread/platform/radio.h>
+#include <platform/ThreadStackManager.h>
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
@@ -285,6 +288,17 @@ void AppTask::UpdateTemperatureTimeoutCallback(k_timer *timer)
 				LOG_WRN("Entering sleep for %u seconds.", kSensorUpdateIntervalMs / 1000);
 			}
 		},
+			reinterpret_cast<intptr_t>(timer->user_data));
+}
+
+void AppTask::CommissionPolicyTimeoutCallback(k_timer *timer)
+{
+	if (!timer || !timer->user_data) {
+		return;
+	}
+
+	DeviceLayer::PlatformMgr().ScheduleWork(
+		[](intptr_t p) { static_cast<AppTask *>(reinterpret_cast<void *>(p))->UpdateCommissioningAwakePolicy(); },
 		reinterpret_cast<intptr_t>(timer->user_data));
 }
 
@@ -386,6 +400,9 @@ CHIP_ERROR AppTask::StartApp()
 	k_timer_init(&mTimer, AppTask::UpdateTemperatureTimeoutCallback, nullptr);
 	k_timer_user_data_set(&mTimer, this);
 	k_timer_start(&mTimer, K_MSEC(kSensorUpdateIntervalMs), K_MSEC(kSensorUpdateIntervalMs));
+	k_timer_init(&mCommissionPolicyTimer, AppTask::CommissionPolicyTimeoutCallback, nullptr);
+	k_timer_user_data_set(&mCommissionPolicyTimer, this);
+	k_timer_start(&mCommissionPolicyTimer, K_MSEC(1000), K_MSEC(kCommissionAwakeKickPeriodMs));
 
 	if (UpdateSensorReadings(true)) {
 		UpdateMatterAttributes();
@@ -402,6 +419,67 @@ CHIP_ERROR AppTask::StartApp()
 bool AppTask::IsCommissioned() const
 {
 	return Server::GetInstance().GetFabricTable().FabricCount() > 0;
+}
+
+void AppTask::UpdateCommissioningAwakePolicy()
+{
+	const int64_t nowMs = k_uptime_get();
+	const bool windowOpen = Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen();
+
+	if (windowOpen != mCommissioningWindowOpen) {
+		mCommissioningWindowOpen = windowOpen;
+		if (windowOpen) {
+			mStayAwakeUntilMs = 0;
+			if (kEnableSleepLogs) {
+				LOG_WRN("Commissioning window opened. Sleep hold active.");
+			}
+		} else {
+			mStayAwakeUntilMs = nowMs + kCommissionWindowPostCloseGraceMs;
+			if (kEnableSleepLogs) {
+				LOG_WRN("Commissioning window closed. Keeping awake for %u seconds.",
+					kCommissionWindowPostCloseGraceMs / 1000);
+			}
+		}
+	}
+
+	const bool holdActive = windowOpen || (mStayAwakeUntilMs > nowMs);
+	ApplyThreadTxPower(holdActive ? kCommissioningThreadTxPowerDbm : kPostCommissionThreadTxPowerDbm,
+			   holdActive ? "commissioning hold" : "post-commission policy");
+
+	if (!holdActive) {
+		return;
+	}
+
+	if ((nowMs - mLastAwakeKickMs) < kCommissionAwakeKickPeriodMs) {
+		return;
+	}
+
+	Server::GetInstance().GetICDManager().OnNetworkActivity();
+	mLastAwakeKickMs = nowMs;
+}
+
+void AppTask::ApplyThreadTxPower(int8_t txPowerDbm, const char *context)
+{
+	if (mAppliedThreadTxPowerDbm == txPowerDbm) {
+		return;
+	}
+
+	ThreadStackMgr().LockThreadStack();
+	otInstance *instance = openthread_get_default_instance();
+	otError err = OT_ERROR_INVALID_STATE;
+
+	if (instance != nullptr) {
+		err = otPlatRadioSetTransmitPower(instance, txPowerDbm);
+	}
+
+	ThreadStackMgr().UnlockThreadStack();
+
+	if (err == OT_ERROR_NONE) {
+		LOG_WRN("Thread TX power set to %d dBm (%s)", txPowerDbm, context);
+		mAppliedThreadTxPowerDbm = txPowerDbm;
+	} else if (kEnableSleepLogs) {
+		LOG_WRN("Thread TX power change failed: %d (%s)", err, context);
+	}
 }
 
 static uint8_t VoltsToPercent(float v)

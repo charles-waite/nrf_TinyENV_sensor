@@ -42,6 +42,14 @@ config TINYENV_ENABLE_BOOT_I2C_SCAN
 	bool "Enable I2C bus scan at boot"
 	default y
 
+config TINYENV_POST_COMMISSION_THREAD_TX_POWER_DBM
+	int "Thread TX power after commissioning (dBm)"
+	range -20 20
+	default 0
+	help
+	  Runtime Thread TX power used after commissioning hold expires.
+	  During commissioning window and post-close grace, firmware forces
+	  full power for reliability.
 
 # Reduce Thread TX output power to 0 dBm for SED device
 config OPENTHREAD_DEFAULT_TX_POWER
