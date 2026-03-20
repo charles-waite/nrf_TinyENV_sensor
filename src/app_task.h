@@ -9,6 +9,7 @@
 #include "board/board.h"
 
 #include <platform/CHIPDeviceLayer.h>
+#include <openthread/thread.h>
 
 struct Identify;
 struct device;
@@ -41,6 +42,7 @@ private:
 
 	static void UpdateTemperatureTimeoutCallback(k_timer *timer);
 	static void CommissionPolicyTimeoutCallback(k_timer *timer);
+	static void ThreadStateChangedCallback(otChangedFlags flags, void *context);
 
 	static void ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged);
 
@@ -49,6 +51,7 @@ private:
 	void ApplyThreadTxPower(int8_t txPowerDbm, const char *context);
 	void UpdateMatterAttributes();
 	bool IsCommissioned() const;
+	void HandleThreadStateChange(otChangedFlags flags);
 
 	const struct device *mSht4x = nullptr;
 	bool mShtReady = false;
@@ -63,4 +66,7 @@ private:
 	int16_t mTemperatureSensorMinValue = 0;
 	int16_t mCurrentTemperature = 0;
 	uint16_t mCurrentHumidity = 0;
+	otDeviceRole mLastThreadRole = OT_DEVICE_ROLE_DISABLED;
+	uint16_t mLastParentRloc16 = 0;
+	bool mHasLastParent = false;
 };

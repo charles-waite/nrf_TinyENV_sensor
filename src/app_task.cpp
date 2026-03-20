@@ -255,6 +255,24 @@ static void InitWakeButton()
 	gpio_add_callback(sWakeBtn.port, &sWakeBtnCb);
 #endif
 }
+
+const char *ThreadRoleToString(otDeviceRole role)
+{
+	switch (role) {
+	case OT_DEVICE_ROLE_DISABLED:
+		return "disabled";
+	case OT_DEVICE_ROLE_DETACHED:
+		return "detached";
+	case OT_DEVICE_ROLE_CHILD:
+		return "child";
+	case OT_DEVICE_ROLE_ROUTER:
+		return "router";
+	case OT_DEVICE_ROLE_LEADER:
+		return "leader";
+	default:
+		return "unknown";
+	}
+}
 } /* namespace */
 
 void AppTask::ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged)
@@ -302,6 +320,15 @@ void AppTask::CommissionPolicyTimeoutCallback(k_timer *timer)
 		reinterpret_cast<intptr_t>(timer->user_data));
 }
 
+void AppTask::ThreadStateChangedCallback(otChangedFlags flags, void *context)
+{
+	if (context == nullptr) {
+		return;
+	}
+
+	static_cast<AppTask *>(context)->HandleThreadStateChange(flags);
+}
+
 CHIP_ERROR AppTask::Init()
 {
 	/* Initialize Matter stack */
@@ -342,6 +369,14 @@ CHIP_ERROR AppTask::Init()
 	}
 
 	ReturnErrorOnFailure(sIdentifyCluster.Init());
+
+	ThreadStackMgr().LockThreadStack();
+	otInstance *otInstance = openthread_get_default_instance();
+	if (otInstance != nullptr) {
+		(void)otSetStateChangedCallback(otInstance, ThreadStateChangedCallback, this);
+		mLastThreadRole = otThreadGetDeviceRole(otInstance);
+	}
+	ThreadStackMgr().UnlockThreadStack();
 
 	mSht4x = DEVICE_DT_GET_ANY(sensirion_sht4x);
 	if (mSht4x && device_is_ready(mSht4x)) {
@@ -683,4 +718,46 @@ void AppTask::UpdateMatterAttributes()
 
 	VLOG_DBG("Sensor update: temp=%d, rh=%u, vbat=%.3fV (%u%%)",
 		 GetCurrentTemperature(), GetCurrentHumidity(), vbat, pct);
+}
+
+void AppTask::HandleThreadStateChange(otChangedFlags flags)
+{
+	ThreadStackMgr().LockThreadStack();
+	otInstance *otInstance = openthread_get_default_instance();
+
+	if (otInstance == nullptr) {
+		ThreadStackMgr().UnlockThreadStack();
+		return;
+	}
+
+	if ((flags & OT_CHANGED_THREAD_ROLE) != 0) {
+		const otDeviceRole role = otThreadGetDeviceRole(otInstance);
+		if (role != mLastThreadRole) {
+			LOG_WRN("Thread role: %s -> %s", ThreadRoleToString(mLastThreadRole), ThreadRoleToString(role));
+			mLastThreadRole = role;
+		}
+	}
+
+	const bool checkParent = (flags & (OT_CHANGED_THREAD_ROLE | OT_CHANGED_THREAD_RLOC_ADDED |
+					   OT_CHANGED_THREAD_RLOC_REMOVED | OT_CHANGED_THREAD_PARTITION_ID)) != 0;
+	if (checkParent) {
+		const otDeviceRole role = otThreadGetDeviceRole(otInstance);
+		if (role == OT_DEVICE_ROLE_CHILD) {
+			otRouterInfo parentInfo;
+			if (otThreadGetParentInfo(otInstance, &parentInfo) == OT_ERROR_NONE) {
+				const uint16_t parentRloc = parentInfo.mRloc16;
+				if (!mHasLastParent || mLastParentRloc16 != parentRloc) {
+					LOG_WRN("Thread parent RLOC16: 0x%04x", parentRloc);
+					mLastParentRloc16 = parentRloc;
+					mHasLastParent = true;
+				}
+			}
+		} else if (mHasLastParent) {
+			LOG_WRN("Thread parent cleared (role=%s)", ThreadRoleToString(role));
+			mHasLastParent = false;
+			mLastParentRloc16 = 0;
+		}
+	}
+
+	ThreadStackMgr().UnlockThreadStack();
 }

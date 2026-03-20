@@ -51,9 +51,9 @@ config TINYENV_POST_COMMISSION_THREAD_TX_POWER_DBM
 	  During commissioning window and post-close grace, firmware forces
 	  full power for reliability.
 
-# Reduce Thread TX output power to 0 dBm for SED device
+# Keep Thread TX power high enough for robust parent/router handoffs.
 config OPENTHREAD_DEFAULT_TX_POWER
-	default 0
+	default 8
 
 source "$(ZEPHYR_CONNECTEDHOMEIP_MODULE_DIR)/config/nrfconnect/chip-module/Kconfig.features"
 source "$(ZEPHYR_CONNECTEDHOMEIP_MODULE_DIR)/config/nrfconnect/chip-module/Kconfig.defaults"
