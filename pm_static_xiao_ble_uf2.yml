@@ -1,0 +1,16 @@
+# UF2 layout for XIAO nRF52840 w/ SoftDevice S140 v7.3.0
+softdevice_reserved:
+  address: 0x0
+  size: 0x26000
+
+app:
+  address: 0x26000
+  size: 0xC6000
+
+settings_storage:
+  address: 0xEC000
+  size: 0x8000
+
+uf2_partition:
+  address: 0xF4000
+  size: 0xC000

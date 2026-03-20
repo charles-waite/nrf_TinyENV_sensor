@@ -4,11 +4,13 @@ This repo customizes Nordic's Matter Temperature Sensor sample for the Seeed XIA
 
 ## Current Functionality
 
-- **SHT4x sensor on I2C1** (real temperature + humidity).
+- **SHT4x sensor on I2C0** (real temperature + humidity).
 - **Battery voltage sense** using the XIAO nRF52840 VBAT circuit:
   - **Enable pin**: P0.14 (drive low to enable)
   - **ADC input**: P0.31 (AIN7)
   - **Divider**: 1 MΩ / 510 kΩ
+- **Wake button (optional)**: add a `wake_btn` alias in the devicetree overlay to enable a GPIO wake event.
+- **Sleep logging toggle**: set `kEnableSleepLogs = true` in `src/app_task.cpp` to log sleep/wake cycles.
 
 ## Branches
 
@@ -31,6 +33,7 @@ Builds a UF2 app without MCUboot/OTA for the stock UF2 bootloader.
 
 Output:
 - `build/xiao_ble_uf2_app/zephyr/zephyr.uf2`
+- Low-power profile output: `build/xiao_ble_uf2_lowpower/zephyr/zephyr.uf2`
 
 Build commands (from repo root):
 
@@ -48,6 +51,18 @@ PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
 /opt/homebrew/bin/cmake --build /Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app
 ```
 
+Low-power measurement build:
+
+```sh
+./scripts/build_uf2_lowpower.sh
+```
+
+Notes:
+- `./scripts/build_uf2.sh` remains the debug-friendly UF2 profile.
+- `./scripts/build_uf2_lowpower.sh` adds `prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
+- Both scripts use `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
+
 ## TODO
 
 - Research the Matter Low Power (0x0508) cluster before enabling it in ZAP.
+- Consider adding atmospheric pressure sensing/cluster support.
