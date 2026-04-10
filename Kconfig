@@ -51,6 +51,31 @@ config TINYENV_POST_COMMISSION_THREAD_TX_POWER_DBM
 	  During commissioning window and post-close grace, firmware forces
 	  full power for reliability.
 
+config TINYENV_DIAGNOSTIC_MODE
+	bool "Enable diagnostic telemetry mode"
+	default n
+	help
+	  Enables persistent counters, reset-cause tracking, watchdog setup,
+	  periodic health snapshots, and detached-role recovery logging.
+
+config TINYENV_DIAG_WATCHDOG_TIMEOUT_SEC
+	int "Diagnostic watchdog timeout (seconds)"
+	range 30 3600
+	default 180
+	depends on TINYENV_DIAGNOSTIC_MODE
+
+config TINYENV_DIAG_SNAPSHOT_INTERVAL_SEC
+	int "Diagnostic health snapshot interval (seconds)"
+	range 60 3600
+	default 600
+	depends on TINYENV_DIAGNOSTIC_MODE
+
+config TINYENV_DIAG_DETACHED_REBOOT_SEC
+	int "Commissioned detached-role reboot threshold (seconds)"
+	range 60 3600
+	default 300
+	depends on TINYENV_DIAGNOSTIC_MODE
+
 # Keep Thread TX power high enough for robust parent/router handoffs.
 config OPENTHREAD_DEFAULT_TX_POWER
 	default 8
