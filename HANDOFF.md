@@ -1,14 +1,14 @@
 # Handoff Notes — nrf-TinyENV
 
 ## Current state
-- Repo location: `/Users/cwaite/Documents/nrf-TinyENV`
+- Repo location: `.`
 - Target board: **Seeed XIAO nRF52840 (non Plus/Sense)**
 - SDK: **nRF Connect SDK v3.2.1** installed at `/opt/nordic/ncs/v3.2.1`
 - Toolchain: `/opt/nordic/ncs/toolchains/322ac893fe`
 - Build command that works (run from nRF Connect terminal):
   ```bash
   cd /opt/nordic/ncs/v3.2.1
-  west build -b xiao_ble -s "/Users/cwaite/Documents/nrf-TinyENV" -d "/Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble"
+  west build -b xiao_ble -s "." -d "./build/xiao_ble"
   ```
 - App scaffold was replaced with NCS **Matter temperature_sensor** sample (copied from `/opt/nordic/ncs/v3.2.1/nrf/samples/matter/temperature_sensor`).
 - ESP32 reference project remains under `ESP32 source/` for feature mapping.
@@ -21,7 +21,7 @@
 - Use the NCS wrapper to launch ZAP with correct templates:
   ```bash
   /opt/nordic/ncs/v3.2.1/modules/lib/matter/scripts/tools/zap/run_zaptool.sh \
-    "/Users/cwaite/Documents/nrf-TinyENV/src/default_zap/temperature_sensor.zap"
+    "./src/default_zap/temperature_sensor.zap"
   ```
 - If manual template selection is needed:
   - `/opt/nordic/ncs/v3.2.1/modules/lib/matter/src/app/zap-templates/zcl/zcl.json`

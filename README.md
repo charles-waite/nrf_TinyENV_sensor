@@ -49,12 +49,12 @@ ZEPHYR_TOOLCHAIN_VARIANT=zephyr \
 ZEPHYR_SDK_INSTALL_DIR=/opt/nordic/ncs/toolchains/322ac893fe/opt/zephyr-sdk \
 /opt/homebrew/bin/cmake -DWEST_PYTHON=/opt/nordic/ncs/toolchains/322ac893fe/opt/python@3.12/bin/python3.12 \
   -DZEPHYR_BASE=/opt/nordic/ncs/v3.2.1/zephyr \
-  -B/Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app -GNinja \
-  -DBOARD=xiao_ble -S/Users/cwaite/Documents/nrf-TinyENV \
+  -B./build/xiao_ble_uf2_app -GNinja \
+  -DBOARD=xiao_ble -S. \
   -DCONF_FILE=prj.conf\;prj_uf2.conf
 
 PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
-/opt/homebrew/bin/cmake --build /Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app
+/opt/homebrew/bin/cmake --build ./build/xiao_ble_uf2_app
 ```
 
 Low-power measurement build:

@@ -6,12 +6,12 @@
 
 ## Codex Zephyr Workflow
 - Use the global skill `zephyr-build-debug` for Zephyr/NCS tasks in this repo.
-- App root default: `/Users/cwaite/Documents/nrf-TinyENV`.
+- App root default: `.`.
 - Preferred `west` path: `/opt/nordic/ncs/toolchains/322ac893fe/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/bin/west`.
 - Default board if not specified by the task: `xiao_ble`.
 - Do not change XIAO I2C mapping (`i2c0` on D4/D5 in `boards/xiao_ble.overlay`) unless explicitly requested.
 - Default verification command:
-  `/opt/nordic/ncs/toolchains/322ac893fe/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/bin/west build -b xiao_ble -s /Users/cwaite/Documents/nrf-TinyENV -d /Users/cwaite/Documents/nrf-TinyENV/build`
+  `/opt/nordic/ncs/toolchains/322ac893fe/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12/bin/west build -b xiao_ble -s . -d ./build`
 - Use clean reconfigure (`-p always`) only when config/toolchain/board settings changed or build cache is suspected stale.
 
 ## Branch Safety
