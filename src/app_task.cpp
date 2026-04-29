@@ -21,15 +21,20 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/watchdog.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
+#include <zephyr/settings/settings.h>
+#include <zephyr/sys/reboot.h>
 #include <hal/nrf_saadc.h>
+#include <hal/nrf_power.h>
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 #include <zephyr/devicetree.h>
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 
 #include <zephyr/logging/log.h>
 
@@ -59,6 +64,11 @@ constexpr uint32_t kLedHeartbeatOnMs = 200;
 constexpr bool kEnableHeartbeat = false;
 constexpr bool kEnableSleepLogs = false;
 constexpr bool kEnableSensorLogs = false;
+constexpr bool kEnableDiagnosticMode = IS_ENABLED(CONFIG_TINYENV_DIAGNOSTIC_MODE);
+constexpr int64_t kDiagSnapshotIntervalMs =
+	static_cast<int64_t>(CONFIG_TINYENV_DIAG_SNAPSHOT_INTERVAL_SEC) * 1000;
+constexpr int64_t kDetachedRebootThresholdMs =
+	static_cast<int64_t>(CONFIG_TINYENV_DIAG_DETACHED_REBOOT_SEC) * 1000;
 
 constexpr float kPlaceholderBatteryVolts = 3.69f;
 constexpr float kBatteryGain = 1.0f; /* calibration placeholder */
@@ -80,6 +90,58 @@ const struct device *sAdcDev = DEVICE_DT_GET(DT_NODELABEL(adc));
 const struct device *sGpioDev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 const struct device *sI2c1Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c1));
 const struct device *sI2c0Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c0));
+const struct device *sWdtDev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(wdt0));
+
+constexpr const char *kDiagKeyBootCount = "tinyenv/diag/boot_count";
+constexpr const char *kDiagKeyWdtResetCount = "tinyenv/diag/wdt_reset_count";
+constexpr const char *kDiagKeyThreadDetachCount = "tinyenv/diag/thread_detach_count";
+constexpr const char *kDiagKeyThreadReattachCount = "tinyenv/diag/thread_reattach_count";
+constexpr const char *kDiagKeySensorFailureCount = "tinyenv/diag/sensor_failure_count";
+constexpr const char *kDiagKeyAdcFailureCount = "tinyenv/diag/adc_failure_count";
+constexpr const char *kDiagKeyLastResetReas = "tinyenv/diag/last_reset_reas";
+constexpr const char *kDiagKeyLastUptimeSec = "tinyenv/diag/last_uptime_sec";
+constexpr const char *kDiagKeyLastThreadRole = "tinyenv/diag/last_thread_role";
+
+static bool SaveDiagValue(const char *key, uint32_t value)
+{
+	return settings_save_one(key, &value, sizeof(value)) == 0;
+}
+
+struct DiagLoadContext {
+	uint32_t bootCount = 0;
+	uint32_t wdtResetCount = 0;
+	uint32_t threadDetachCount = 0;
+	uint32_t threadReattachCount = 0;
+	uint32_t sensorFailureCount = 0;
+	uint32_t adcFailureCount = 0;
+	uint32_t lastResetReas = 0;
+};
+
+static int DiagLoadCb(const char *key, size_t len, settings_read_cb read_cb, void *cb_arg, void *param)
+{
+	auto *ctx = static_cast<DiagLoadContext *>(param);
+	uint32_t value = 0;
+	if (len != sizeof(value) || read_cb(cb_arg, &value, sizeof(value)) != static_cast<ssize_t>(sizeof(value))) {
+		return 0;
+	}
+
+	if (strcmp(key, "boot_count") == 0) {
+		ctx->bootCount = value;
+	} else if (strcmp(key, "wdt_reset_count") == 0) {
+		ctx->wdtResetCount = value;
+	} else if (strcmp(key, "thread_detach_count") == 0) {
+		ctx->threadDetachCount = value;
+	} else if (strcmp(key, "thread_reattach_count") == 0) {
+		ctx->threadReattachCount = value;
+	} else if (strcmp(key, "sensor_failure_count") == 0) {
+		ctx->sensorFailureCount = value;
+	} else if (strcmp(key, "adc_failure_count") == 0) {
+		ctx->adcFailureCount = value;
+	} else if (strcmp(key, "last_reset_reas") == 0) {
+		ctx->lastResetReas = value;
+	}
+	return 0;
+}
 
 #define LED0_NODE DT_ALIAS(led0)
 #define LED1_NODE DT_ALIAS(led1)
@@ -302,6 +364,8 @@ void AppTask::UpdateTemperatureTimeoutCallback(k_timer *timer)
 
 			AppTask::Instance().UpdateMatterAttributes();
 			PulseGreenOnce();
+			AppTask::Instance().MaybeLogAndPersistHealthSnapshot();
+			AppTask::Instance().DiagFeedWatchdog();
 			if (kEnableSleepLogs) {
 				LOG_WRN("Entering sleep for %u seconds.", kSensorUpdateIntervalMs / 1000);
 			}
@@ -333,6 +397,7 @@ CHIP_ERROR AppTask::Init()
 {
 	/* Initialize Matter stack */
 	ReturnErrorOnFailure(Nrf::Matter::PrepareServer());
+	DiagOnBoot();
 
 #if DT_NODE_HAS_STATUS(LED0_NODE, okay) || DT_NODE_HAS_STATUS(LED1_NODE, okay) || \
 	DT_NODE_HAS_STATUS(LED2_NODE, okay)
@@ -390,6 +455,7 @@ CHIP_ERROR AppTask::Init()
 		LogI2CBusScan();
 	}
 	InitWakeButton();
+	DiagInitWatchdog();
 
 #ifdef CONFIG_CHIP_ICD_UAT_SUPPORT
 	{
@@ -442,9 +508,11 @@ CHIP_ERROR AppTask::StartApp()
 	if (UpdateSensorReadings(true)) {
 		UpdateMatterAttributes();
 		PulseGreenOnce();
+		MaybeLogAndPersistHealthSnapshot();
 	}
 
 	while (true) {
+		DiagFeedWatchdog();
 		Nrf::DispatchNextTask();
 	}
 
@@ -481,16 +549,19 @@ void AppTask::UpdateCommissioningAwakePolicy()
 	ApplyThreadTxPower(holdActive ? kCommissioningThreadTxPowerDbm : kPostCommissionThreadTxPowerDbm,
 			   holdActive ? "commissioning hold" : "post-commission policy");
 
-	if (!holdActive) {
-		return;
+	if (holdActive && (nowMs - mLastAwakeKickMs) >= kCommissionAwakeKickPeriodMs) {
+		Server::GetInstance().GetICDManager().OnNetworkActivity();
+		mLastAwakeKickMs = nowMs;
 	}
 
-	if ((nowMs - mLastAwakeKickMs) < kCommissionAwakeKickPeriodMs) {
-		return;
+	if (kEnableDiagnosticMode && IsCommissioned() && mThreadDetached && mThreadDetachedSinceMs > 0 &&
+	    (nowMs - mThreadDetachedSinceMs) > kDetachedRebootThresholdMs) {
+		LOG_ERR("Thread detached for %u seconds while commissioned; rebooting",
+			static_cast<unsigned int>((nowMs - mThreadDetachedSinceMs) / 1000));
+		sys_reboot(SYS_REBOOT_COLD);
 	}
 
-	Server::GetInstance().GetICDManager().OnNetworkActivity();
-	mLastAwakeKickMs = nowMs;
+	MaybeLogAndPersistHealthSnapshot();
 }
 
 void AppTask::ApplyThreadTxPower(int8_t txPowerDbm, const char *context)
@@ -515,6 +586,139 @@ void AppTask::ApplyThreadTxPower(int8_t txPowerDbm, const char *context)
 	} else if (kEnableSleepLogs) {
 		LOG_WRN("Thread TX power change failed: %d (%s)", err, context);
 	}
+}
+
+void AppTask::DiagOnBoot()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	DiagLoadContext loaded;
+	(void)settings_load_subtree_direct("tinyenv/diag", DiagLoadCb, &loaded);
+
+	mDiagBootCount = loaded.bootCount;
+	mDiagWdtResetCount = loaded.wdtResetCount;
+	mDiagThreadDetachCount = loaded.threadDetachCount;
+	mDiagThreadReattachCount = loaded.threadReattachCount;
+	mDiagSensorFailureCount = loaded.sensorFailureCount;
+	mDiagAdcFailureCount = loaded.adcFailureCount;
+	mDiagLastResetReas = loaded.lastResetReas;
+
+	const uint32_t resetreas = nrf_power_resetreas_get(NRF_POWER);
+	nrf_power_resetreas_clear(NRF_POWER, resetreas);
+
+	++mDiagBootCount;
+	(void)SaveDiagValue(kDiagKeyBootCount, mDiagBootCount);
+	(void)SaveDiagValue(kDiagKeyLastResetReas, resetreas);
+	mDiagLastResetReas = resetreas;
+
+	if ((resetreas & NRF_POWER_RESETREAS_DOG_MASK) != 0U) {
+		++mDiagWdtResetCount;
+		(void)SaveDiagValue(kDiagKeyWdtResetCount, mDiagWdtResetCount);
+	}
+
+	LOG_WRN("Diag boot: count=%u resetreas=0x%08x wdt_resets=%u", mDiagBootCount, resetreas,
+		mDiagWdtResetCount);
+}
+
+void AppTask::DiagInitWatchdog()
+{
+	if (!kEnableDiagnosticMode || sWdtDev == nullptr || !device_is_ready(sWdtDev)) {
+		return;
+	}
+
+	struct wdt_timeout_cfg timeout_cfg = {};
+	timeout_cfg.flags = WDT_FLAG_RESET_SOC;
+	timeout_cfg.window.min = 0U;
+	timeout_cfg.window.max = CONFIG_TINYENV_DIAG_WATCHDOG_TIMEOUT_SEC * 1000U;
+	timeout_cfg.callback = nullptr;
+
+	mWdtChannel = wdt_install_timeout(sWdtDev, &timeout_cfg);
+	if (mWdtChannel < 0) {
+		LOG_ERR("Diag watchdog install failed: %d", mWdtChannel);
+		mWdtChannel = -1;
+		return;
+	}
+
+	int err = wdt_setup(sWdtDev, 0);
+	if (err != 0) {
+		LOG_ERR("Diag watchdog setup failed: %d", err);
+		mWdtChannel = -1;
+		return;
+	}
+
+	LOG_WRN("Diag watchdog enabled: %u seconds", CONFIG_TINYENV_DIAG_WATCHDOG_TIMEOUT_SEC);
+}
+
+void AppTask::DiagFeedWatchdog()
+{
+	if (!kEnableDiagnosticMode || mWdtChannel < 0 || sWdtDev == nullptr) {
+		return;
+	}
+
+	(void)wdt_feed(sWdtDev, mWdtChannel);
+}
+
+void AppTask::DiagOnThreadDetached()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	++mDiagThreadDetachCount;
+	(void)SaveDiagValue(kDiagKeyThreadDetachCount, mDiagThreadDetachCount);
+}
+
+void AppTask::DiagOnThreadReattached()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	++mDiagThreadReattachCount;
+	(void)SaveDiagValue(kDiagKeyThreadReattachCount, mDiagThreadReattachCount);
+}
+
+void AppTask::DiagOnSensorReadFailure()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	++mDiagSensorFailureCount;
+	(void)SaveDiagValue(kDiagKeySensorFailureCount, mDiagSensorFailureCount);
+}
+
+void AppTask::DiagOnAdcReadFailure()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	++mDiagAdcFailureCount;
+	(void)SaveDiagValue(kDiagKeyAdcFailureCount, mDiagAdcFailureCount);
+}
+
+void AppTask::MaybeLogAndPersistHealthSnapshot()
+{
+	if (!kEnableDiagnosticMode) {
+		return;
+	}
+
+	const int64_t nowMs = k_uptime_get();
+	if (mLastHealthSnapshotMs != 0 && (nowMs - mLastHealthSnapshotMs) < kDiagSnapshotIntervalMs) {
+		return;
+	}
+
+	mLastHealthSnapshotMs = nowMs;
+	const uint32_t uptimeSec = static_cast<uint32_t>(nowMs / 1000);
+	(void)SaveDiagValue(kDiagKeyLastUptimeSec, uptimeSec);
+	(void)SaveDiagValue(kDiagKeyLastThreadRole, static_cast<uint32_t>(mLastThreadRole));
+
+	LOG_WRN("Diag snapshot: up=%us role=%s detach=%u reattach=%u sensor_fail=%u adc_fail=%u",
+		uptimeSec, ThreadRoleToString(mLastThreadRole), mDiagThreadDetachCount,
+		mDiagThreadReattachCount, mDiagSensorFailureCount, mDiagAdcFailureCount);
 }
 
 static uint8_t VoltsToPercent(float v)
@@ -616,6 +820,7 @@ static float ReadBatteryVolts()
 
 	if (err) {
 		LOG_ERR("ADC read failed: %d", err);
+		AppTask::Instance().DiagOnAdcReadFailure();
 		return ReadBatteryVoltsPlaceholder();
 	}
 
@@ -653,6 +858,7 @@ bool AppTask::UpdateSensorReadings(bool force)
 	}
 
 	if (sensor_sample_fetch(mSht4x) != 0) {
+		DiagOnSensorReadFailure();
 		VLOG_DBG("SHT4x sample fetch failed");
 		return false;
 	}
@@ -661,6 +867,7 @@ bool AppTask::UpdateSensorReadings(bool force)
 	sensor_value rh_sv;
 	if (sensor_channel_get(mSht4x, SENSOR_CHAN_AMBIENT_TEMP, &temp_sv) != 0 ||
 	    sensor_channel_get(mSht4x, SENSOR_CHAN_HUMIDITY, &rh_sv) != 0) {
+		DiagOnSensorReadFailure();
 		VLOG_DBG("SHT4x channel read failed");
 		return false;
 	}
@@ -734,6 +941,15 @@ void AppTask::HandleThreadStateChange(otChangedFlags flags)
 		const otDeviceRole role = otThreadGetDeviceRole(otInstance);
 		if (role != mLastThreadRole) {
 			LOG_WRN("Thread role: %s -> %s", ThreadRoleToString(mLastThreadRole), ThreadRoleToString(role));
+			if (role == OT_DEVICE_ROLE_DETACHED && !mThreadDetached) {
+				mThreadDetached = true;
+				mThreadDetachedSinceMs = k_uptime_get();
+				DiagOnThreadDetached();
+			} else if (role != OT_DEVICE_ROLE_DETACHED && mThreadDetached) {
+				mThreadDetached = false;
+				mThreadDetachedSinceMs = 0;
+				DiagOnThreadReattached();
+			}
 			mLastThreadRole = role;
 		}
 	}

@@ -54,6 +54,8 @@ Temporary Items
 build/
 .zephyr-cache/
 .ccache/
+/Library/
+/ESP32 source/
 .ninja_deps
 .ninja_log
 zephyr/.config

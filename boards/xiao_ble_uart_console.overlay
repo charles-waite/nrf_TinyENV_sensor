@@ -1,0 +1,20 @@
+/* UART-only console override for XIAO nRF52840.
+ * Routes Zephyr console/shell/log transport to uart0 and disables USB device.
+ *
+ * xiao_ble pin map:
+ *   uart0 TX = P1.11 = D6
+ *   uart0 RX = P1.12 = D7
+ */
+/ {
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,uart-mcumgr = &uart0;
+		zephyr,bt-mon-uart = &uart0;
+		zephyr,bt-c2h-uart = &uart0;
+	};
+};
+
+&zephyr_udc0 {
+	status = "disabled";
+};

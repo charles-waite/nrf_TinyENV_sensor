@@ -10,6 +10,7 @@
 
 #include <platform/CHIPDeviceLayer.h>
 #include <openthread/thread.h>
+#include <stdint.h>
 
 struct Identify;
 struct device;
@@ -26,6 +27,14 @@ public:
 
 	int16_t GetCurrentTemperature() const { return mCurrentTemperature; }
 	uint16_t GetCurrentHumidity() const { return mCurrentHumidity; }
+	void MaybeLogAndPersistHealthSnapshot();
+	void DiagOnBoot();
+	void DiagOnThreadDetached();
+	void DiagOnThreadReattached();
+	void DiagOnSensorReadFailure();
+	void DiagOnAdcReadFailure();
+	void DiagFeedWatchdog();
+	void DiagInitWatchdog();
 
 private:
 	CHIP_ERROR Init();
@@ -69,4 +78,15 @@ private:
 	otDeviceRole mLastThreadRole = OT_DEVICE_ROLE_DISABLED;
 	uint16_t mLastParentRloc16 = 0;
 	bool mHasLastParent = false;
+	bool mThreadDetached = false;
+	int64_t mThreadDetachedSinceMs = 0;
+	int64_t mLastHealthSnapshotMs = 0;
+	int mWdtChannel = -1;
+	uint32_t mDiagBootCount = 0;
+	uint32_t mDiagWdtResetCount = 0;
+	uint32_t mDiagThreadDetachCount = 0;
+	uint32_t mDiagThreadReattachCount = 0;
+	uint32_t mDiagSensorFailureCount = 0;
+	uint32_t mDiagAdcFailureCount = 0;
+	uint32_t mDiagLastResetReas = 0;
 };

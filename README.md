@@ -11,6 +11,12 @@ This repo customizes Nordic's Matter Temperature Sensor sample for the Seeed XIA
   - **Divider**: 1 MΩ / 510 kΩ
 - **Wake button (optional)**: add a `wake_btn` alias in the devicetree overlay to enable a GPIO wake event.
 - **Sleep logging toggle**: set `kEnableSleepLogs = true` in `src/app_task.cpp` to log sleep/wake cycles.
+- **Diagnostic mode** (`CONFIG_TINYENV_DIAGNOSTIC_MODE=y` in `prj.conf`):
+  - Persists boot/watchdog/thread/sensor/ADC counters under `tinyenv/diag/*`.
+  - Captures and stores `RESETREAS` at boot.
+  - Enables watchdog reset recovery tracking.
+  - Stores periodic health snapshots (uptime + Thread role).
+  - Reboots if a commissioned node remains Thread-detached longer than the configured threshold.
 
 ## Branches
 
@@ -43,12 +49,12 @@ ZEPHYR_TOOLCHAIN_VARIANT=zephyr \
 ZEPHYR_SDK_INSTALL_DIR=/opt/nordic/ncs/toolchains/322ac893fe/opt/zephyr-sdk \
 /opt/homebrew/bin/cmake -DWEST_PYTHON=/opt/nordic/ncs/toolchains/322ac893fe/opt/python@3.12/bin/python3.12 \
   -DZEPHYR_BASE=/opt/nordic/ncs/v3.2.1/zephyr \
-  -B/Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app -GNinja \
-  -DBOARD=xiao_ble -S/Users/cwaite/Documents/nrf-TinyENV \
+  -B./build/xiao_ble_uf2_app -GNinja \
+  -DBOARD=xiao_ble -S. \
   -DCONF_FILE=prj.conf\;prj_uf2.conf
 
 PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
-/opt/homebrew/bin/cmake --build /Users/cwaite/Documents/nrf-TinyENV/build/xiao_ble_uf2_app
+/opt/homebrew/bin/cmake --build ./build/xiao_ble_uf2_app
 ```
 
 Low-power measurement build:
@@ -57,9 +63,20 @@ Low-power measurement build:
 ./scripts/build_uf2_lowpower.sh
 ```
 
+UART-only serial/log build (no USB CDC):
+
+```sh
+./scripts/build_uf2_uart.sh
+```
+
 Notes:
 - `./scripts/build_uf2.sh` remains the debug-friendly UF2 profile.
 - `./scripts/build_uf2_lowpower.sh` adds `prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
+- `./scripts/build_uf2_uart.sh` builds a UF2 image with **UART-only** console/logging:
+  - overlays `boards/xiao_ble_uart_console.overlay`
+  - disables USB device + CDC in `prj_uf2_uart.conf`
+  - routes Zephyr console/shell/log transport to `uart0` (TX=D6, RX=D7, 115200 baud)
+- Shell command `diag_dump` prints persisted diagnostic keys from `tinyenv/diag/*`.
 - Both scripts use `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
 
 ## TODO
