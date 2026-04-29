@@ -39,7 +39,7 @@ Builds a UF2 app without MCUboot/OTA for the stock UF2 bootloader.
 
 Output:
 - `build/xiao_ble_uf2_app/zephyr/zephyr.uf2`
-- Low-power profile output: `build/xiao_ble_uf2_lowpower/zephyr/zephyr.uf2`
+- Diagnostic UF2 output (`--diag`): `build/xiao_ble_uf2_diag/zephyr/zephyr.uf2`
 
 Build commands (from repo root):
 
@@ -58,10 +58,16 @@ PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
 /opt/homebrew/bin/cmake --build ./build/xiao_ble_uf2_app
 ```
 
-Low-power measurement build:
+Default low-power UF2 build:
 
 ```sh
-./scripts/build_uf2_lowpower.sh
+./scripts/build_uf2.sh
+```
+
+Diagnostic/full-feature UF2 build:
+
+```sh
+./scripts/build_uf2.sh --diag
 ```
 
 UART-only serial/log build (no USB CDC):
@@ -71,8 +77,8 @@ UART-only serial/log build (no USB CDC):
 ```
 
 Notes:
-- `./scripts/build_uf2.sh` remains the debug-friendly UF2 profile.
-- `./scripts/build_uf2_lowpower.sh` adds `config/app/prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
+- `./scripts/build_uf2.sh` now defaults to the low-power profile by adding `config/app/prj_lowpower.conf`.
+- `./scripts/build_uf2.sh --diag` uses the previous debug/full-feature UF2 profile without the low-power overlay.
 - `./scripts/build_uf2_uart.sh` builds a UF2 image with **UART-only** console/logging:
   - overlays `boards/xiao_ble_uart_console.overlay`
   - disables USB device + CDC in `config/app/prj_uf2_uart.conf`

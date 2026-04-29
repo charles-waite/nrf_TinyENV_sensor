@@ -6,8 +6,27 @@ TOOLCHAIN_ROOT="/opt/nordic/ncs/toolchains/322ac893fe"
 PYTHON_BIN="${TOOLCHAIN_ROOT}/opt/python@3.12/bin"
 TOOLCHAIN_BIN="${TOOLCHAIN_ROOT}/bin"
 ZEPHYR_SDK="${TOOLCHAIN_ROOT}/opt/zephyr-sdk"
-BUILD_DIR="${ROOT_DIR}/build/xiao_ble_uf2_app"
-CACHE_DIR="${ROOT_DIR}/build/zephyr-cache"
+
+DIAG_MODE=0
+if [[ "${1:-}" == "--diag" ]]; then
+  DIAG_MODE=1
+  shift
+fi
+
+if [[ "$#" -gt 0 ]]; then
+  echo "Usage: $0 [--diag]"
+  exit 2
+fi
+
+if [[ "${DIAG_MODE}" == "1" ]]; then
+  BUILD_DIR="${ROOT_DIR}/build/xiao_ble_uf2_diag"
+  CACHE_DIR="${ROOT_DIR}/build/zephyr-cache-diag"
+  EXTRA_CONF_FILE="config/app/prj_uf2.conf"
+else
+  BUILD_DIR="${ROOT_DIR}/build/xiao_ble_uf2_app"
+  CACHE_DIR="${ROOT_DIR}/build/zephyr-cache"
+  EXTRA_CONF_FILE="config/app/prj_uf2.conf;config/app/prj_lowpower.conf"
+fi
 
 export PATH="${TOOLCHAIN_BIN}:${PYTHON_BIN}:${PATH}"
 if [[ "${CCACHE_DISABLE:-}" == "1" ]]; then
@@ -30,7 +49,7 @@ fi
   -GNinja \
   -DBOARD=xiao_ble \
   -DCONF_FILE=config/app/prj.conf \
-  -DEXTRA_CONF_FILE=config/app/prj_uf2.conf \
+  -DEXTRA_CONF_FILE="${EXTRA_CONF_FILE}" \
   -DPython3_EXECUTABLE="${PYTHON_BIN}/python3.12" \
   -DZEPHYR_TOOLCHAIN_VARIANT=zephyr \
   -DZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK}" \
