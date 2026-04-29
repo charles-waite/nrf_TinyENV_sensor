@@ -51,7 +51,8 @@ ZEPHYR_SDK_INSTALL_DIR=/opt/nordic/ncs/toolchains/322ac893fe/opt/zephyr-sdk \
   -DZEPHYR_BASE=/opt/nordic/ncs/v3.2.1/zephyr \
   -B./build/xiao_ble_uf2_app -GNinja \
   -DBOARD=xiao_ble -S. \
-  -DCONF_FILE=prj.conf\;prj_uf2.conf
+  -DCONF_FILE=config/app/prj.conf \
+  -DEXTRA_CONF_FILE=config/app/prj_uf2.conf
 
 PATH=/opt/nordic/ncs/toolchains/322ac893fe/bin:$PATH \
 /opt/homebrew/bin/cmake --build ./build/xiao_ble_uf2_app
@@ -71,13 +72,22 @@ UART-only serial/log build (no USB CDC):
 
 Notes:
 - `./scripts/build_uf2.sh` remains the debug-friendly UF2 profile.
-- `./scripts/build_uf2_lowpower.sh` adds `prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
+- `./scripts/build_uf2_lowpower.sh` adds `config/app/prj_lowpower.conf` to enable PM and disable console/log/shell/LED scan activity for current measurements.
 - `./scripts/build_uf2_uart.sh` builds a UF2 image with **UART-only** console/logging:
   - overlays `boards/xiao_ble_uart_console.overlay`
-  - disables USB device + CDC in `prj_uf2_uart.conf`
+  - disables USB device + CDC in `config/app/prj_uf2_uart.conf`
   - routes Zephyr console/shell/log transport to `uart0` (TX=D6, RX=D7, 115200 baud)
 - Shell command `diag_dump` prints persisted diagnostic keys from `tinyenv/diag/*`.
 - Both scripts use `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
+
+## Repository Layout
+
+- `config/app/`: application config overlays (`prj*.conf`).
+- `config/sysbuild/`: sysbuild config overlays.
+- `config/pm/`: partition manager static files for xiao_ble builds.
+- `boards/`: xiao_ble board overlays used by this project.
+- `docs/`: project notes and handoff docs.
+- `scripts/`: reproducible local build wrappers.
 
 ## TODO
 

@@ -29,8 +29,8 @@ fi
   -B "${BUILD_DIR}" \
   -GNinja \
   -DBOARD=xiao_ble \
-  -DCONF_FILE=prj.conf \
-  -DEXTRA_CONF_FILE="prj_uf2.conf;prj_lowpower.conf" \
+  -DCONF_FILE=config/app/prj.conf \
+  -DEXTRA_CONF_FILE="config/app/prj_uf2.conf;config/app/prj_lowpower.conf" \
   -DPython3_EXECUTABLE="${PYTHON_BIN}/python3.12" \
   -DZEPHYR_TOOLCHAIN_VARIANT=zephyr \
   -DZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK}" \

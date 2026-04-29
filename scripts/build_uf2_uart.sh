@@ -29,7 +29,7 @@ fi
   -B "${BUILD_DIR}" \
   -GNinja \
   -DBOARD=xiao_ble \
-  -DCONF_FILE="prj.conf;prj_uf2_uart.conf" \
+  -DCONF_FILE="config/app/prj.conf;config/app/prj_uf2_uart.conf" \
   -DDTC_OVERLAY_FILE="boards/xiao_ble.overlay;boards/xiao_ble_uart_console.overlay" \
   -DPython3_EXECUTABLE="${PYTHON_BIN}/python3.12" \
   -DZEPHYR_TOOLCHAIN_VARIANT=zephyr \

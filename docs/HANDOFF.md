@@ -11,7 +11,7 @@
   west build -b xiao_ble -s "." -d "./build/xiao_ble"
   ```
 - App scaffold was replaced with NCS **Matter temperature_sensor** sample (copied from `/opt/nordic/ncs/v3.2.1/nrf/samples/matter/temperature_sensor`).
-- ESP32 reference project remains under `ESP32 source/` for feature mapping.
+- ESP32 reference project is not kept in this repo; track feature parity via notes in this document.
 
 ## ZAP / Matter Cluster Editor notes
 - Matter Cluster Editor (MCE) expects a `.matter` file, not `.zap`.
@@ -42,4 +42,3 @@
 ## Cleanup notes
 - `.DS_Store` ignored via `.gitignore` and removed from index.
 - If running ZAP from this CLI, needs escalated permission to open GUI app.
-
