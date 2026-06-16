@@ -11,11 +11,13 @@
 #include "board/board.h"
 #include "clusters/identify.h"
 #include "lib/core/CHIPError.h"
+#include "tinyenv_device_identity.h"
 
 #include <app/server/Server.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
 #include <lib/support/Span.h>
 #include <openthread.h>
+#include <openthread/thread.h>
 #include <openthread/platform/radio.h>
 #include <platform/ThreadStackManager.h>
 #include <zephyr/drivers/adc.h>
@@ -48,6 +50,18 @@ LOG_MODULE_DECLARE(app, CONFIG_CHIP_APP_LOG_LEVEL);
 	} while (0)
 #endif
 
+#ifndef CONFIG_TINYENV_DIAG_SNAPSHOT_INTERVAL_SEC
+#define CONFIG_TINYENV_DIAG_SNAPSHOT_INTERVAL_SEC 600
+#endif
+
+#ifndef CONFIG_TINYENV_DIAG_DETACHED_REBOOT_SEC
+#define CONFIG_TINYENV_DIAG_DETACHED_REBOOT_SEC 300
+#endif
+
+#ifndef CONFIG_TINYENV_DIAG_WATCHDOG_TIMEOUT_SEC
+#define CONFIG_TINYENV_DIAG_WATCHDOG_TIMEOUT_SEC 180
+#endif
+
 using namespace ::chip;
 using namespace ::chip::app;
 using namespace ::chip::DeviceLayer;
@@ -76,6 +90,8 @@ constexpr float kVbatDividerRatio = (1000000.0f + 510000.0f) / 510000.0f; /* 1M/
 constexpr float kAdcRefVolts = 0.6f;
 constexpr float kAdcGainVal = 1.0f / 6.0f;
 constexpr uint8_t kAdcResolution = 12;
+constexpr uint8_t kBatterySampleCount = 4;
+constexpr uint8_t kBatterySampleDelayMs = 1;
 constexpr uint8_t kVbatEnablePin = 14; /* P0.14 */
 constexpr uint8_t kVbatAdcChannelId = 0;
 constexpr uint8_t kVbatAdcInput = NRF_SAADC_AIN7; /* P0.31 / AIN7 */
@@ -88,7 +104,6 @@ Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
 
 const struct device *sAdcDev = DEVICE_DT_GET(DT_NODELABEL(adc));
 const struct device *sGpioDev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
-const struct device *sI2c1Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c1));
 const struct device *sI2c0Dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(i2c0));
 const struct device *sWdtDev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(wdt0));
 
@@ -233,34 +248,20 @@ static void LedStatusThread(void *, void *, void *)
 
 static void LogI2CBusScan()
 {
-	struct Bus {
-		const char *label;
-		const struct device *dev;
-	};
+	static constexpr uint8_t kSht4xI2cAddress = 0x44;
+	static constexpr uint8_t kSht4xSoftResetCommand = 0x94;
 
-	const Bus buses[] = {
-		{"I2C1", sI2c1Dev},
-		{"I2C0", sI2c0Dev},
-	};
+	if (!sI2c0Dev || !device_is_ready(sI2c0Dev)) {
+		LOG_ERR("I2C0 not ready");
+		return;
+	}
 
-	for (const auto &bus : buses) {
-		if (!bus.dev || !device_is_ready(bus.dev)) {
-			LOG_ERR("%s not ready", bus.label);
-			continue;
-		}
-
-		uint8_t found_count = 0;
-		for (uint8_t addr = 0x03; addr < 0x78; ++addr) {
-			const int err = i2c_write(bus.dev, nullptr, 0, addr);
-			if (err == 0) {
-				LOG_WRN("%s device detected at 0x%02X", bus.label, addr);
-				++found_count;
-			}
-		}
-
-		if (found_count == 0) {
-			LOG_ERR("No I2C devices found on %s", bus.label);
-		}
+	const int err = i2c_write(sI2c0Dev, &kSht4xSoftResetCommand, sizeof(kSht4xSoftResetCommand),
+				  kSht4xI2cAddress);
+	if (err == 0) {
+		LOG_WRN("I2C0 SHT4x probe acknowledged at 0x%02X", kSht4xI2cAddress);
+	} else {
+		LOG_ERR("No SHT4x ACK on I2C0 address 0x%02X: %d", kSht4xI2cAddress, err);
 	}
 }
 
@@ -281,21 +282,20 @@ static void PulseGreenOnce()
 #endif
 }
 
-static void WakeButtonHandler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(pins);
-
-	if (kEnableSleepLogs) {
-		LOG_WRN("Wake button pressed.");
-	}
-	Server::GetInstance().GetICDManager().OnNetworkActivity();
-}
-
 static void InitWakeButton()
 {
 #if DT_HAS_ALIAS(wake_btn)
+	auto wakeButtonHandler = [](const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+		ARG_UNUSED(dev);
+		ARG_UNUSED(cb);
+		ARG_UNUSED(pins);
+
+		if (kEnableSleepLogs) {
+			LOG_WRN("Wake button pressed.");
+		}
+		Server::GetInstance().GetICDManager().OnNetworkActivity();
+	};
+
 	if (!device_is_ready(sWakeBtn.port)) {
 		LOG_ERR("Wake button GPIO not ready");
 		return;
@@ -313,7 +313,7 @@ static void InitWakeButton()
 		return;
 	}
 
-	gpio_init_callback(&sWakeBtnCb, WakeButtonHandler, BIT(sWakeBtn.pin));
+	gpio_init_callback(&sWakeBtnCb, wakeButtonHandler, BIT(sWakeBtn.pin));
 	gpio_add_callback(sWakeBtn.port, &sWakeBtnCb);
 #endif
 }
@@ -384,19 +384,15 @@ void AppTask::CommissionPolicyTimeoutCallback(k_timer *timer)
 		reinterpret_cast<intptr_t>(timer->user_data));
 }
 
-void AppTask::ThreadStateChangedCallback(otChangedFlags flags, void *context)
-{
-	if (context == nullptr) {
-		return;
-	}
-
-	static_cast<AppTask *>(context)->HandleThreadStateChange(flags);
-}
-
 CHIP_ERROR AppTask::Init()
 {
 	/* Initialize Matter stack */
-	ReturnErrorOnFailure(Nrf::Matter::PrepareServer());
+	Nrf::Matter::InitData initData;
+#if IS_ENABLED(CONFIG_TINYENV_RUNTIME_IDENTITY_PROVIDER)
+	initData.mPreServerInitClbk = TinyEnvConfigureRuntimeMatterIdentity;
+	initData.mPostServerInitClbk = TinyEnvInstallRuntimeDeviceInstanceInfoProvider;
+#endif
+	ReturnErrorOnFailure(Nrf::Matter::PrepareServer(initData));
 	DiagOnBoot();
 
 #if DT_NODE_HAS_STATUS(LED0_NODE, okay) || DT_NODE_HAS_STATUS(LED1_NODE, okay) || \
@@ -434,14 +430,6 @@ CHIP_ERROR AppTask::Init()
 	}
 
 	ReturnErrorOnFailure(sIdentifyCluster.Init());
-
-	ThreadStackMgr().LockThreadStack();
-	otInstance *otInstance = openthread_get_default_instance();
-	if (otInstance != nullptr) {
-		(void)otSetStateChangedCallback(otInstance, ThreadStateChangedCallback, this);
-		mLastThreadRole = otThreadGetDeviceRole(otInstance);
-	}
-	ThreadStackMgr().UnlockThreadStack();
 
 	mSht4x = DEVICE_DT_GET_ANY(sensirion_sht4x);
 	if (mSht4x && device_is_ready(mSht4x)) {
@@ -527,6 +515,8 @@ bool AppTask::IsCommissioned() const
 void AppTask::UpdateCommissioningAwakePolicy()
 {
 	const int64_t nowMs = k_uptime_get();
+	HandleThreadStateChange(OT_CHANGED_THREAD_ROLE | OT_CHANGED_THREAD_RLOC_ADDED |
+				OT_CHANGED_THREAD_RLOC_REMOVED | OT_CHANGED_THREAD_PARTITION_ID);
 	const bool windowOpen = Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen();
 
 	if (windowOpen != mCommissioningWindowOpen) {
@@ -806,30 +796,41 @@ static float ReadBatteryVolts()
 		return ReadBatteryVoltsPlaceholder();
 	}
 
-	int16_t raw = 0;
-	adc_sequence sequence = {};
-	sequence.channels = BIT(kVbatAdcChannelId);
-	sequence.buffer = &raw;
-	sequence.buffer_size = sizeof(raw);
-	sequence.resolution = kAdcResolution;
+	uint32_t raw_sum = 0;
 
 	gpio_pin_set(sGpioDev, kVbatEnablePin, 0);
 	k_sleep(K_MSEC(2));
-	const int err = adc_read(sAdcDev, &sequence);
+
+	for (uint8_t i = 0; i < kBatterySampleCount; ++i) {
+		int16_t raw = 0;
+		adc_sequence sequence = {};
+		sequence.channels = BIT(kVbatAdcChannelId);
+		sequence.buffer = &raw;
+		sequence.buffer_size = sizeof(raw);
+		sequence.resolution = kAdcResolution;
+
+		const int err = adc_read(sAdcDev, &sequence);
+		if (err) {
+			gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
+			LOG_ERR("ADC read failed: %d", err);
+			AppTask::Instance().DiagOnAdcReadFailure();
+			return ReadBatteryVoltsPlaceholder();
+		}
+
+		if (raw > 0) {
+			raw_sum += static_cast<uint32_t>(raw);
+		}
+
+		if (i + 1 < kBatterySampleCount) {
+			k_sleep(K_MSEC(kBatterySampleDelayMs));
+		}
+	}
+
 	gpio_pin_set(sGpioDev, kVbatEnablePin, 1);
 
-	if (err) {
-		LOG_ERR("ADC read failed: %d", err);
-		AppTask::Instance().DiagOnAdcReadFailure();
-		return ReadBatteryVoltsPlaceholder();
-	}
-
-	if (raw < 0) {
-		raw = 0;
-	}
-
 	const float full_scale = kAdcRefVolts / kAdcGainVal;
-	const float v_in = (static_cast<float>(raw) / ((1 << kAdcResolution) - 1)) * full_scale;
+	const float raw_avg = static_cast<float>(raw_sum) / kBatterySampleCount;
+	const float v_in = (raw_avg / ((1 << kAdcResolution) - 1)) * full_scale;
 	const float vbat = v_in * kVbatDividerRatio * kBatteryGain;
 
 	return vbat;

@@ -39,7 +39,8 @@ Builds a UF2 app without MCUboot/OTA for the stock UF2 bootloader.
 
 Output:
 - `build/xiao_ble_uf2_app/zephyr/zephyr.uf2`
-- Diagnostic UF2 output (`--diag`): `build/xiao_ble_uf2_diag/zephyr/zephyr.uf2`
+- USB diagnostic UF2 output (`--diag-usb`): `build/xiao_ble_uf2_diag_usb/zephyr/zephyr.uf2`
+- UART diagnostic UF2 output (`--diag-uart`): `build/xiao_ble_uf2_diag_uart/zephyr/zephyr.uf2`
 
 Build commands (from repo root):
 
@@ -64,27 +65,28 @@ Default low-power UF2 build:
 ./scripts/build_uf2.sh
 ```
 
-Diagnostic/full-feature UF2 build:
+USB-CDC diagnostic UF2 build:
 
 ```sh
-./scripts/build_uf2.sh --diag
+./scripts/build_uf2.sh --diag-usb
 ```
 
-UART-only serial/log build (no USB CDC):
+UART diagnostic UF2 build:
 
 ```sh
-./scripts/build_uf2_uart.sh
+./scripts/build_uf2.sh --diag-uart
 ```
 
 Notes:
 - `./scripts/build_uf2.sh` now defaults to the low-power profile by adding `config/app/prj_lowpower.conf`.
-- `./scripts/build_uf2.sh --diag` uses the previous debug/full-feature UF2 profile without the low-power overlay.
-- `./scripts/build_uf2_uart.sh` builds a UF2 image with **UART-only** console/logging:
+- `./scripts/build_uf2.sh --diag-usb` builds a diagnostic UF2 image with USB-CDC console/logging.
+- `./scripts/build_uf2.sh --diag-uart` builds a diagnostic UF2 image with hardware UART console/logging:
   - overlays `boards/xiao_ble_uart_console.overlay`
-  - disables USB device + CDC in `config/app/prj_uf2_uart.conf`
+  - disables USB device + CDC in `config/app/prj_diag_uart.conf`
   - routes Zephyr console/shell/log transport to `uart0` (TX=D6, RX=D7, 115200 baud)
-- Shell command `diag_dump` prints persisted diagnostic keys from `tinyenv/diag/*`.
-- Both scripts use `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
+- `./scripts/build_uf2.sh --diag` remains accepted as a compatibility alias for `--diag-usb`.
+- Shell command `diag_dump` prints persisted diagnostic keys from `tinyenv/diag/*` when shell support is enabled.
+- The build script uses `ccache` by default. Set `CCACHE_DISABLE=1` to bypass cache.
 
 ## Repository Layout
 

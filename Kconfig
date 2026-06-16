@@ -40,7 +40,21 @@ config TINYENV_ENABLE_STATUS_LED_ACTIVITY
 
 config TINYENV_ENABLE_BOOT_I2C_SCAN
 	bool "Enable I2C bus scan at boot"
+	default n
+
+config TINYENV_WIPE_SETTINGS_ON_BOOT
+	bool "Erase settings storage on boot"
+	default n
+	help
+	  One-shot recovery mode for UF2-only boards. Erases the settings
+	  partition at boot, logs the result, and parks instead of starting Matter.
+
+config TINYENV_RUNTIME_IDENTITY_PROVIDER
+	bool "Use runtime Matter identity provider"
 	default y
+	help
+	  Derive Matter serial/RDI values from nRF FICR at runtime. Disable only
+	  for bring-up isolation when testing Matter/OpenThread initialization.
 
 config TINYENV_POST_COMMISSION_THREAD_TX_POWER_DBM
 	int "Thread TX power after commissioning (dBm)"

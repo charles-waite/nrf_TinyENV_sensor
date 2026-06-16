@@ -51,7 +51,6 @@ private:
 
 	static void UpdateTemperatureTimeoutCallback(k_timer *timer);
 	static void CommissionPolicyTimeoutCallback(k_timer *timer);
-	static void ThreadStateChangedCallback(otChangedFlags flags, void *context);
 
 	static void ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged);
 
