@@ -65,6 +65,19 @@ Default low-power UF2 build:
 ./scripts/build_uf2.sh
 ```
 
+Release package build:
+
+```sh
+./scripts/package_release.sh Verified
+```
+
+Release package output:
+
+- `build/releases/Verified/tinyenv_nrf_xiao_ble_Verified.uf2`: drag-and-drop UF2 for the stock XIAO nRF52840 bootloader.
+- `build/releases/Verified/tinyenv_nrf_xiao_ble_Verified.hex`: addressed image for SWD/debug-probe flashing.
+- `build/releases/Verified/tinyenv_nrf_xiao_ble_Verified_app_0x27000.bin`: raw application binary; flash at `0x27000`.
+- `build/releases/Verified/SHA256SUMS.txt`: checksums for release attachments.
+
 USB-CDC diagnostic UF2 build:
 
 ```sh
